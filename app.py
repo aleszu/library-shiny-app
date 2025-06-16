@@ -19,12 +19,14 @@ branch_physical_reading = pd.read_csv("cplbranches/data/branch_physical_reading_
 branch_service_census_food_data['medianincome'] = pd.to_numeric(branch_service_census_food_data['medianincome'], errors='coerce')
 
 ICONS = {
-    "income": fa.icon_svg("money-bill")
+    "income": fa.icon_svg("money-bill"),
+    "user": fa.icon_svg("user"),
+    "computer": fa.icon_svg("computer"),
+    "clock": fa.icon_svg("clock"),
 }
 
 category_map = {
     "physical_item_adult": "Adult",
-    "physical_item_adult_ya": "Adult YA",
     "physical_item_ya": "Young Adult",
     "physical_item_juvenile": "Juvenile"
 }
@@ -66,44 +68,11 @@ app_ui = ui.page_fluid(
         ),  
 
         ui.navset_tab(  
-        ui.nav_panel("Visits, Programs, and Computers", 
-                     ui.h4("Visits and programs held"),
-
-                    ui.layout_columns(
-                        ui.card(
-                            output_widget("visits_plot"),
-                            full_screen=True
-                        ),
-                        ui.card(
-                            output_widget("programs_plot"),
-                            full_screen=True
-                        ),
-                        col_widths=[6,6]
-                        ),
-                    
-                    ui.h4("Computer usage"),
-
-                    ui.layout_columns(
-                        ui.value_box(
-                           "Total stations",
-                           ui.output_ui("stations") 
-                        ),
-                        ui.value_box(
-                           "Total sessions",
-                           ui.output_ui("sessions") 
-                        ),
-                        ui.value_box(
-                           "Average session length",
-                           ui.output_ui("average_session_length") 
-                        ),
-                        col_widths=[4,4,4]
-                        )
-
-                     ),
+        
         ui.nav_panel("Circulation", 
                      
                      ui.h4("Top titles, genres, and reading levels"),
-                     
+                     ui.tags.br(),
                         ui.layout_columns(
                             ui.card(
                                 output_widget("readinglevels_plot"),
@@ -137,6 +106,52 @@ app_ui = ui.page_fluid(
                         )
                      
                      ),
+
+        ui.nav_panel("Visits, Programs, and Computers", 
+            ui.h4("Visits and programs held"),
+            ui.tags.br(),
+
+                    ui.layout_columns(
+                        ui.card(
+                            output_widget("visits_plot"),
+                            full_screen=True
+                        ),
+                        col_widths=[12]
+                        ),
+                    
+                    ui.layout_columns(
+                        ui.card(
+                            output_widget("programs_plot"),
+                            full_screen=True
+                        ),
+                        ui.card(
+                        output_widget("scatter_plot"),
+                        full_screen=True
+                        ),
+                        col_widths=[6,6]
+                        # ui.output_ui("map")
+                    ),
+                     ui.h4("Computer usage"),
+                     ui.layout_columns(
+                        ui.value_box(
+                           "Total stations",
+                           ui.output_ui("stations"),
+                           showcase=ICONS["computer"]
+                        ),
+                        ui.value_box(
+                           "Total sessions",
+                           ui.output_ui("sessions"),
+                           showcase=ICONS["user"] 
+                        ),
+                        ui.value_box(
+                           "Average session length",
+                           ui.output_ui("average_session_length"),
+                           showcase=ICONS["clock"]
+                        ),
+                        col_widths=[4,4,4]
+                        )
+
+                     ),
         id="tab",  
         ),       
     ),
@@ -148,11 +163,34 @@ def server(input, output, session):
     @render.image
     def image():
         from pathlib import Path
-
         dir = Path(__file__).resolve().parent
         img = {"src": str(dir / "cplbranches/cpl-logo.svg"), "height":'70px', "style":"height='10px' !important"}
         return img
     
+    @render.image
+    def map_image():
+        from pathlib import Path
+        base_dir = Path(__file__).resolve().parent
+        map_dir = base_dir / "cplbranches/maps"
+
+        # Sanitize and format filename (ensure branch input matches file naming)
+        branch_name = input.branch().replace(" ", "_")  # adapt if more cleaning is needed
+        filename = f"map_{branch_name}.png"
+        full_path = map_dir / filename
+
+        if not full_path.exists():
+            return {"src": "", "alt": f"Map not found: {filename}"}
+
+        return {
+            "src": str(full_path),
+            "width": "100%",  # or a fixed width like "800px"
+            "style": "border: 1px solid #ccc;"
+        }
+
+    @render.ui
+    def map():
+        return ui.output_image("map_image", height="70px")
+
     @render.ui
     def cpllogo():
         return ui.output_image("image", height="70px")
@@ -310,12 +348,41 @@ def server(input, output, session):
         fig.update_layout(
                 xaxis_tickangle=-45,
                 showlegend=False,
-                hovermode="x unified",
                 template='simple_white',
                 yaxis_title='Average attendance',
                 xaxis_title='',
                 margin=dict(t=60, b=120)
             )
+        return fig
+
+    @render_plotly
+    def scatter_plot():
+        # Filter data
+        df_filtered = public_calendar[
+            (public_calendar["branch_name"] == input.branch()) &
+            (public_calendar["actual_attendance"] < 100)
+        ]
+
+        # Create jittered scatterplot
+        fig = px.scatter(
+            df_filtered,
+            x="time_parsed",
+            y="actual_attendance",
+            hover_data={
+            "actual_attendance": True,
+            "title": True,
+            "time_parsed": False  # hide if already shown as x-axis
+        }
+        )
+
+        fig.update_traces(marker=dict(size=6, line=dict(width=0)))
+        fig.update_layout(
+            title="Start time vs. in-person attendance",
+            xaxis_title="Start time",
+            yaxis_title="Attendance",
+            template="simple_white"
+        )
+
         return fig
 
     @render.ui
@@ -354,7 +421,7 @@ def server(input, output, session):
         else:
             return "No data found"
 
- # Reading levels plot
+    # Reading levels plot
     @reactive.Calc
     def filtered_branch_physical_reading():
         return branch_physical_reading[branch_physical_reading["branch_name"] == input.branch()]
@@ -391,13 +458,14 @@ def server(input, output, session):
         )
         fig.update_layout(
             yaxis=dict(tickformat=","),
-            hovermode="x unified",
             template='simple_white',
             legend_title="Category"
         )
         return fig
     
+    #####
     # Top genres table 
+    #####
     @reactive.Calc
     def filtered_branch_titles():
         return branch_titles_filtered[branch_titles_filtered["branch_name"] == input.branch()]
@@ -424,7 +492,10 @@ def server(input, output, session):
     def top_genres_table():
         return render.DataTable(genre_tbl(), height="600px")
 
+    #####
     # top_reading_level_table
+    #####
+
     @reactive.Calc
     def summarized_readinglevel_data():
         df = filtered_branch_titles()
